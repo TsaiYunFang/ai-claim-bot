@@ -44,10 +44,18 @@ async def callback(request: Request):
 # 6) 訊息處理（echo）
 @handler.add(MessageEvent, message=TextMessage)
 def handle_text_message(event: MessageEvent):
-    user_text = event.message.text
-    line_bot_api.reply_message(
-        event.reply_token,
-        TextSendMessage(text=f"你說：{user_text}")
-    )
+    try:
+        user_text = event.message.text
+        print(f"[EVENT] got text: {user_text}")  # 觀察是否收到文字
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(text=f"你說：{user_text}")
+        )
+        print("[REPLY] sent OK")
+    except Exception as e:
+        import traceback
+        print(f"[ERROR] reply failed: {e}")
+        traceback.print_exc()
+
 
 # 不需要 if __name__ == "__main__"；Render 用 gunicorn 啟動 main:app
