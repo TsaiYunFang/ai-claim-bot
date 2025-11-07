@@ -1,10 +1,10 @@
 # main.py
 import os
 import traceback
-from typing import Dict, Set
+from typing import Dict, Set, Optional
 
 from fastapi import FastAPI, Request, HTTPException
-from fastapi.responses import JSONResponse, PlainTextResponse
+from fastapi.responses import JSONResponse, PlainTextResponse, Response
 from dotenv import load_dotenv
 
 from linebot import LineBotApi, WebhookHandler
@@ -27,7 +27,6 @@ CHANNEL_ACCESS_TOKEN = os.getenv("LINE_CHANNEL_ACCESS_TOKEN")
 CHANNEL_SECRET = os.getenv("LINE_CHANNEL_SECRET")
 
 if not CHANNEL_ACCESS_TOKEN or not CHANNEL_SECRET:
-    # 沒設定金鑰時，直接丟錯，避免 NoneType 物件造成 handler.add 出錯
     raise RuntimeError(
         "LINE_CHANNEL_ACCESS_TOKEN 或 LINE_CHANNEL_SECRET 未設定。"
         "請確認 .env 與 Render 環境變數。"
@@ -36,15 +35,21 @@ if not CHANNEL_ACCESS_TOKEN or not CHANNEL_SECRET:
 line_bot_api = LineBotApi(CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(CHANNEL_SECRET)
 
-app = FastAPI(title="AI Claim Bot", version="0.1.0")
+app = FastAPI(title="AI Claim Bot", version="0.1.1")
 
 
 # -----------------------------
 # 健康檢查 / 根路由
 # -----------------------------
 @app.get("/health")
-async def health_check():
-    return JSONResponse(content={"status": "ok"}, status_code=200)
+async def health_check_get():
+    """給瀏覽器/UptimeRobot/Render 的 GET 健康檢查"""
+    return JSONResponse({"status": "ok"}, status_code=200)
+
+@app.head("/health")
+async def health_check_head():
+    """有些監控會用 HEAD 檢查，回 200 即可"""
+    return Response(status_code=200)
 
 @app.get("/")
 async def index():
@@ -61,7 +66,7 @@ async def index():
 # -----------------------------
 # 關鍵字與文案（可集中維護）
 # -----------------------------
-def normalize(s: str) -> str:
+def normalize(s: Optional[str]) -> str:
     return (s or "").strip().lower().replace("　", "").replace(" ", "")
 
 # 同義詞/別名
@@ -111,7 +116,7 @@ REPLIES: Dict[str, str] = {
     ),
 }
 
-def quick_menu_message(text: str = None) -> TextSendMessage:
+def quick_menu_message(text: Optional[str] = None) -> TextSendMessage:
     """Quick Reply 主選單"""
     return TextSendMessage(
         text=text or REPLIES["menu"],
@@ -124,7 +129,7 @@ def quick_menu_message(text: str = None) -> TextSendMessage:
         ])
     )
 
-def resolve_intent(raw_text: str) -> str | None:
+def resolve_intent(raw_text: str) -> Optional[str]:
     """規範化 + 同義詞比對"""
     t = normalize(raw_text)
     for intent, words in ALIASES.items():
@@ -144,13 +149,11 @@ async def callback(request: Request):
 
     body = await request.body()
     body_str = body.decode("utf-8")
-    # 可觀測性
     print(f"[CALLBACK] raw body: {body_str[:200]}...")
 
     try:
         handler.handle(body_str, signature)
     except InvalidSignatureError:
-        # 簽章錯誤（通常是 secret/token 設錯）
         print("[ERROR] Invalid signature")
         raise HTTPException(status_code=400, detail="Invalid signature")
 
@@ -170,7 +173,6 @@ def handle_text(event: MessageEvent):
         # 1) 明確意圖：回對應文案
         if intent in REPLIES:
             reply = REPLIES[intent]
-            # menu/未知 → 帶 Quick Reply
             if intent == "menu":
                 line_bot_api.reply_message(event.reply_token, quick_menu_message(reply))
             else:
